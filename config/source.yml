@@ -1,0 +1,201 @@
+#neo4jServer_a 运行环境
+neo4jServer_a:
+  id: a
+  url:
+    bolt://10.10.15.27:7687
+    #bolt://10.17.205.190:7687
+    #bolt://10.10.15.129:7687
+  user:
+    neo4j
+  password:
+    123456
+
+
+#neo4jServer_b 运行环境
+neo4jServer_b:
+  id: b
+  url:
+    bolt://10.10.15.27:7688
+    #bolt://10.17.205.190:7687
+    #bolt://10.15.97.89:7687
+  user:
+    neo4j
+  password:
+    123456
+
+#company和relationShip数据来源
+mssql:
+  mssql://app:app127@10.10.15.44/CRDB
+  #mssql://app:app127@10.10.15.43/CRDB
+  #mssql://app:app127@10.10.13.17/CRDB
+
+#汇率转换数据来源
+mssql_rate:
+  mssql://app:app127@10.10.15.44/CentralDB_Stock
+
+#记录company和relationShip数据更新的timestamp
+redisUrl:
+  #- redis://:finchina@10.15.97.48:6379/0
+  #- redis://:finchina@10.15.97.88:6379/0
+  - redis://:finchina@10.15.97.135:6679/0
+  - redis://:finchina@10.15.97.135:6679/1
+
+#远程安装neo4j server的服务器信息
+sshServer:
+  -
+    id: a
+    ips: 
+    # - 10.10.15.129
+    - 10.10.15.27
+    # - 10.17.205.190
+    port:
+      22
+    username:
+      root
+    password:
+      tcdept
+      #FINchina123
+    boltPort:
+      7687
+  -
+    id: b
+    ips: 
+      # - 10.15.97.89
+      - 10.10.15.27
+      # - 10.17.205.190
+    port:
+      22
+    username:
+      root
+    password:
+      tcdept
+    boltPort:
+      7688
+
+#各个SSH远程服务器相关文件及路径信息
+sshConfig:
+  neo4jInstallPath:
+    - /home/neo4j/neo4j-community-3.3.1_a
+    - /home/neo4j/neo4j-community-3.3.1_b
+
+  shellFilePath:
+    - /home/neo4j/
+    - /home/neo4j/
+
+  shellFileName:
+    - importTotalData_a.sh
+    - importTotalData_b.sh
+
+  csvFilePath:
+    - /home/neo4j/neo4j-community-3.3.1_a/import/
+    - /home/neo4j/neo4j-community-3.3.1_b/import/
+
+  csvFileName:
+    - companies.csv
+    - extraNodes.csv
+    - relations_invest.csv
+    - relations_guarantee.csv
+
+  remoteLogsPath:
+    /home/neo4j/shellCmdLogs/
+  logsFileName:
+    - importTotalData_a.log
+    - importTotalData_b.log
+  
+#node的label、index等相关信息，默认使用nodeLabelName1、nodeIndexName1
+indexInfo:
+  nodeLabelName1:
+    company
+  nodeIndexName1:
+    ITCode2
+  nodeLabelName2:
+    company
+  nodeIndexName2:
+    ITCode2
+    
+#全量和增量更新的控制标志
+updateFlag:
+  isUpdateInreComp:
+    'true'
+  isUpdateIncreRel:
+    'true'
+  isUpdateTotalComp:
+    'true'
+  isUpdateTotalRel:
+    'true'
+
+#增量/全量更新的id
+updateInfo:
+  companyId:
+    TComp
+  relationId_invest:
+    TRel_invest
+  relationId_guarantee:
+    TRel_guarantee
+
+#ITCode2->ITName
+dictionaryServer:
+  host: 
+    10.10.15.129
+  port:
+    #8009
+    8010
+  path:
+    #/lookup
+  
+#等待时间设置
+timeSetting:
+  waitIndexOn:            #1次等待创建索引的时间
+    600000	
+  maxWaitIndexOnTimes:    #最多等待索引创建完成的次数
+    10
+  waitGetSysInfo:         #等待获取neo4j sysinfo的时间，即检查neo4j server是否成功启动的时间
+    60000
+  maxWaitSysInfoTimes:    #最多等待查询sysinfo的次数
+    5
+    
+#定时触发全量更新时间
+schedule:
+  hour:
+    6
+  minute:
+    0
+
+#控制任务并发, 加锁机制信息
+lockInfo:
+  resource:
+    - 'lockTimingUpdateTotalData'          #为timingUpdateTotalData方法加锁
+  TTL:
+    #- 600000
+    - 21600000                             #加锁时间, 设置6h
+
+#垃圾回收的设置信息
+gcInfo:
+  warnMemoryLeftValue:                     #剩余的heap内存, 单位byte
+    2000000
+
+#日志相关信息设置
+logInfo:
+  maxLogSize:
+    20480000
+
+#HAProxy配置信息
+haproxyInfo:
+  defaultServerName:
+    'neo4j_servers'
+  defaultServerIP:
+    #127.0.0.1
+    10.15.44.229
+  defaultServerPort:
+    9999
+
+#firewall的控制信息
+# firewallSettingInfo:
+#   startFirewallCmd:
+#     'systemctl start firewalld'
+#   stopFirewallCmd:
+#     'systemctl stop firewalld'
+#   getStatusCmd:
+#     'firewall-cmd --state'
+
+
