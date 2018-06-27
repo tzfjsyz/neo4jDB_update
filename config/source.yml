@@ -157,7 +157,7 @@ timeSetting:
 #定时触发全量更新时间
 schedule:
   hour:
-    6
+    8
   minute:
     0
 
@@ -185,7 +185,8 @@ haproxyInfo:
     'neo4j_servers'
   defaultServerIP:
     #127.0.0.1
-    10.15.44.229
+    #10.15.44.229
+    10.10.15.129
   defaultServerPort:
     9999
 

@@ -518,11 +518,12 @@ let apiHandlers = {
                                                     //建索引时，先set server state maint, 建完索引后set server state ready, 0代表The server is down，2代表The server is fully up.
                                                     hs.backend(HAServerName).server(`server_${serId}`).address(ser.ip[0], ser.neo4jServerBoltPort);
                                                     hs.backend(HAServerName).server(`server_${serId}`).disable();                        //set server state maint
+                                                    hs.backend(HAServerName).server(`server_${serId}`).shutdownSession();                //Immediately terminate all the sessions attached to the specified server.
                                                     hs.backend(HAServerName).server(`server_${serId}`).showState();
 
-                                                    sleep(waitIndexOnTime);
                                                     //6. for test
-                                                    // sleep(60000);
+                                                    // sleep(180000);
+                                                    sleep(waitIndexOnTime);
 
                                                     hs.backend(HAServerName).server(`server_${serId}`).address(ser.ip[0], ser.neo4jServerBoltPort);
                                                     hs.backend(HAServerName).server(`server_${serId}`).enable();                        //set server state ready

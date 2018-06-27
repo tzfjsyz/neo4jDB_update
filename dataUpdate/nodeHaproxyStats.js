@@ -38,16 +38,30 @@ class HAStats {
     }
 
     enable() {
-        console.log(`set server ${this._backend}/${this._serverName} state ready`);
-        logger.info(`set server ${this._backend}/${this._serverName} state ready`);
-        return this._apply(`set server ${this._backend}/${this._serverName} state ready`);
+        // console.log(`set server ${this._backend}/${this._serverName} state ready`);
+        // logger.info(`set server ${this._backend}/${this._serverName} state ready`);
+        // return this._apply(`set server ${this._backend}/${this._serverName} state ready`);
+        console.log(`enable server ${this._backend}/${this._serverName}`);
+        logger.info(`enable server ${this._backend}/${this._serverName}`);
+        return this._apply(`enable server ${this._backend}/${this._serverName}`);
     }
 
     disable() {
-        console.log(`set server ${this._backend}/${this._serverName} state maint`);
-        logger.info(`set server ${this._backend}/${this._serverName} state maint`);
-        return this._apply(`set server ${this._backend}/${this._serverName} state maint`);
+        // console.log(`set server ${this._backend}/${this._serverName} state maint`);
+        // logger.info(`set server ${this._backend}/${this._serverName} state maint`);
+        // return this._apply(`set server ${this._backend}/${this._serverName} state maint`);
+        // return this._apply(`set server ${this._backend}/${this._serverName} state drain`);
+        // return this._apply(`set server ${this._backend}/${this._serverName} agent down`);
+        console.log(`disable server ${this._backend}/${this._serverName}`);
+        logger.info(`disable server ${this._backend}/${this._serverName}`);
+        return this._apply(`disable server ${this._backend}/${this._serverName}`);
     }
+
+    shutdownSession() {
+        console.log(`shutdown sessions server ${this._backend}/${this._serverName}`);
+        logger.info(`shutdown sessions server ${this._backend}/${this._serverName}`);
+        return this._apply(`shutdown sessions server ${this._backend}/${this._serverName}`);
+    }    
 
     showState() {
         console.log(`server ${this._backend}/${this._serverName}: echo "show servers state" | socat stdio tcp4-connect:${this._host}:${this._port}`);
@@ -101,13 +115,25 @@ hs.backend("servers").server('test1').disable();
 hs.backend("servers").server('test1').enable();
 */
 
-// let hs = new HAStats("10.15.44.229",9999);
+// let hs = new HAStats("10.10.15.129",9999);
 
 //切换backend到指定地址
 // hs.backend("neo4j_servers").server('server_a').address("10.10.15.27",7687);
+
+// hs.backend("neo4j_servers").server('server_a').enable();
+
 // hs.backend("neo4j_servers").server('server_a').disable();
+// hs.backend("neo4j_servers").server('server_a').shutdownSession();
+
 // hs.backend("neo4j_servers").server('server_a').showState();
 
-// hs.backend("neo4j_servers").server('server_b').address("10.10.15.27",7688);
+
+
+// hs.backend("neo4j_servers").server('server_b').address("10.10.15.27",7687);
+
 // hs.backend("neo4j_servers").server('server_b').enable();
+
+// hs.backend("neo4j_servers").server('server_b').disable();
+// hs.backend("neo4j_servers").server('server_b').shutdownSession();
+
 // hs.backend("neo4j_servers").server('server_b').showState();
