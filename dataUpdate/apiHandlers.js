@@ -29,7 +29,7 @@ let redlock = new Redlock(
 
         // the max number of times Redlock will attempt
         // to lock a resource before erroring
-        retryCount: 1000,
+        retryCount: 10,
 
         // the time in ms between attempts
         retryDelay: 10000, // time in ms
@@ -88,6 +88,7 @@ schedule.scheduleJob(rule, function () {
     redlock.lock(lockResource, lockTTL).then(async function (lock) {
         let updateFlag = await apiHandlers.timingUpdateTotalData('true');
         if (updateFlag == true || updateFlag == false) {
+            transactions.publishMessage(config.redisPubSubInfo.pubMessage[0]);                         //发布数据导入成功的信息
             // unlock your resource when you are done
             return lock.unlock()
                 .catch(function (err) {
@@ -204,21 +205,25 @@ async function startImportTotalData(ser, shellFileName, remoteShellPath) {
         // let cmd = `cd ${remoteShellPath} && chmod +777 ./${shellFileName} && ./${shellFileName}`;
         let cmd = `cd ${remoteShellPath} && chmod +x ./${shellFileName} && ./${shellFileName}`;
         let importDataResult = { cmdShellResult: null, createIndexStatus: null, systemInfo: null };
+        let serId = ser.id;
+        let systemResult = null;
 
         let cmdShellRes = await executeShell.startCmdShell(cmd, ser);
         if (cmdShellRes.hasOwnProperty('ok') && cmdShellRes.ok == 1) {
             importDataResult.cmdShellResult = cmdShellRes;
             console.log(JSON.stringify(importDataResult.cmdShellResult));
             logger.info(JSON.stringify(importDataResult.cmdShellResult));
+            //建索引时，先set server state maint, 建完索引后set server state ready, 0代表The server is down，2代表The server is fully up.
+            hs.backend(HAServerName).server(`server_${serId}`).address(ser.ip[0], ser.neo4jServerBoltPort);
+            hs.backend(HAServerName).server(`server_${serId}`).disable();                        //set server state maint
+            hs.backend(HAServerName).server(`server_${serId}`).shutdownSession();                //Immediately terminate all the sessions attached to the specified server.
+            hs.backend(HAServerName).server(`server_${serId}`).showState();
         }
         else {
             importDataResult.cmdShellResult = null;
             console.error('执行startCmdShell失败！');
             logger.error('执行startCmdShell失败！');
         }
-
-        let serId = ser.id;
-        let systemResult = null;
         console.log(`startCmdShell_${serId} 执行后sleep ${waitGetSysInfoTime} ms`);
         logger.info(`startCmdShell_${serId} 执行后sleep ${waitGetSysInfoTime} ms`);
         sleep(waitGetSysInfoTime);
@@ -522,7 +527,7 @@ let apiHandlers = {
                                                     hs.backend(HAServerName).server(`server_${serId}`).showState();
 
                                                     //6. for test
-                                                    // sleep(180000);
+                                                    // sleep(10000);
                                                     sleep(waitIndexOnTime);
 
                                                     hs.backend(HAServerName).server(`server_${serId}`).address(ser.ip[0], ser.neo4jServerBoltPort);
@@ -718,6 +723,21 @@ let apiHandlers = {
         }
     },
 
+    //for test ,publishMessageToRedis
+    publishMessageToRedis: async function (request, reply) {
+        try {
+            let message = request.query.message;
+            if (!message) {
+                message = config.redisPubSubInfo.pubMessage[0];
+            }
+            transactions.publishMessage(message);
+            return reply.response({ ok: 1, message: `publishMessageToRedis...` })
+
+        } catch (err) {
+            return reply.response(err);
+        }
+    },
+
     //控制防火墙的开关
     // controlFirewall: async function (request, reply) {
     //     try {
@@ -787,6 +807,7 @@ let apiHandlers = {
             redlock.lock(lockResource, lockTTL).then(async function (lock) {
             let updateFlag = await apiHandlers.timingUpdateTotalData('true');
             if (updateFlag == true || updateFlag == false) {
+                transactions.publishMessage(config.redisPubSubInfo.pubMessage[0]);                         //发布数据导入成功的信息
                 // unlock your resource when you are done
                 return lock.unlock()
                     .catch(function (err) {

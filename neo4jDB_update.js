@@ -83,6 +83,13 @@ server.route({
 //     handler: apiHandlers.controlFirewall
 // });
 
+//for test
+server.route({
+    method: 'GET',
+    path: '/publishMessage',
+    handler: apiHandlers.publishMessageToRedis
+});
+
 server.start((err) => {
     if (err) {
         heapdump.writeSnapshot(dumpFilePath+dumpFileName, function(err, dumpFilePath) {

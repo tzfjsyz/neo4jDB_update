@@ -190,6 +190,16 @@ haproxyInfo:
   defaultServerPort:
     9999
 
+#redis发布与订阅信息
+redisPubSubInfo:
+  clientUrl:
+    - redis://:finchina@10.15.97.135:6679   #确保该redis的URL与每个查询程序的一致(消息订阅者)
+  channelsName:
+    - 'updateDataNews'
+  pubMessage:
+    - 'updateDataOver'
+
+
 #firewall的控制信息
 # firewallSettingInfo:
 #   startFirewallCmd:

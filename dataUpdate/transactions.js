@@ -14,6 +14,7 @@ const driver_a = neo4j.driver(`${config.neo4jServer_a.url}`, neo4j.auth.basic(`$
 const driver_b = neo4j.driver(`${config.neo4jServer_b.url}`, neo4j.auth.basic(`${config.neo4jServer_b.user}`, `${config.neo4jServer_b.password}`), { maxTransactionRetryTime: 30000 });
 const Redis = require('ioredis');
 const redis = new Redis(config.redisUrl[0]);
+const pubClient = new Redis(config.redisPubSubInfo.clientUrl[0]);
 const Client = require('dict-client');
 let client = new Client(config.dictionaryServer.host, config.dictionaryServer.port);
 console.log('dict-client host: ' + config.dictionaryServer.host + ', port: ' + config.dictionaryServer.port);
@@ -433,10 +434,27 @@ let transactions = {
         console.error(error);
         logger.error(error);
         return reject(error);
-
       });
     });
+  },
+
+  //redis发布消息(数据更新完后的通知消息)
+  publishMessage: async function (message) {
+    try {
+      let channels = [];
+      channels = channels.concat(config.redisPubSubInfo.channelsName);
+
+      for (let channel of channels) {
+        pubClient.publish(channel, message);
+        console.log('publish the message: %s to channel: %s', message, channel);
+        logger.info('publish the message: %s to channel: %s', message, channel);
+      }
+    } catch (err) {
+      console.error(err);
+      logger.error(err);
+    }
   }
+
 
 }
 
