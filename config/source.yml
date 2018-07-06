@@ -164,7 +164,7 @@ schedule:
 #控制任务并发, 加锁机制信息
 lockInfo:
   resource:
-    - 'lockTimingUpdateTotalData'          #为timingUpdateTotalData方法加锁
+    - 'locks:lockTimingUpdateTotalData'          #为timingUpdateTotalData方法加锁
   TTL:
     #- 600000
     - 21600000                             #加锁时间, 设置6h

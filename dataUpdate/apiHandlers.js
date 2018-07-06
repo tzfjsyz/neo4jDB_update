@@ -96,6 +96,7 @@ schedule.scheduleJob(rule, function () {
                     // expire, but you probably want to log this error
                     console.error(err);
                     logger.error(err);
+                    return lock.unlock();
                 });
         }
     })
@@ -815,6 +816,7 @@ let apiHandlers = {
                         // expire, but you probably want to log this error
                         console.error(err);
                         logger.error(err);
+                        return lock.unlock();
                     });
             }
             })
