@@ -39,6 +39,8 @@ redisUrl:
   #- redis://:finchina@10.15.97.88:6379/0
   - redis://:finchina@10.15.97.135:6679/0
   - redis://:finchina@10.15.97.135:6679/1
+  #- redis://:finchina@10.17.205.190:6379/5
+  - redis://:finchina@10.15.97.135:6679/11
 
 #远程安装neo4j server的服务器信息
 sshServer:
@@ -95,7 +97,9 @@ sshConfig:
     - extraNodes.csv
     - relations_invest.csv
     - relations_guarantee.csv
-
+    - relations_family.csv
+    - persons.csv
+    - relations_execute.csv
   remoteLogsPath:
     /home/neo4j/shellCmdLogs/
   logsFileName:
@@ -132,6 +136,13 @@ updateInfo:
     TRel_invest
   relationId_guarantee:
     TRel_guarantee
+  relationId_family:
+    TRel_family
+  relationId_executive:
+    TRel_executive
+  relationId_holder:
+    TRel_holder
+
 
 #ITCode2->ITName
 dictionaryServer:
@@ -183,10 +194,10 @@ logInfo:
 haproxyInfo:
   defaultServerName:
     'neo4j_servers'
-  defaultServerIP:
+  defaultServerIPs:
     #127.0.0.1
-    #10.15.44.229
-    10.10.15.129
+    #- 10.15.44.229
+    - 10.10.15.129
   defaultServerPort:
     9999
 

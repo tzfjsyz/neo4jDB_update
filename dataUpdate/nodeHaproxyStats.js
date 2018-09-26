@@ -32,8 +32,8 @@ class HAStats {
     }
 
     address(ip, port) {
-        console.log(`set server ${this._backend}/${this._serverName} addr ${ip} port ${port}`);
-        logger.info(`set server ${this._backend}/${this._serverName} addr ${ip} port ${port}`);
+        console.log(`set server ${this._host} ${this._backend}/${this._serverName} addr ${ip} port ${port}`);
+        logger.info(`set server ${this._host} ${this._backend}/${this._serverName} addr ${ip} port ${port}`);
         return this._apply(`set server ${this._backend}/${this._serverName} addr ${ip} port ${port}`);
     }
 
@@ -41,8 +41,8 @@ class HAStats {
         // console.log(`set server ${this._backend}/${this._serverName} state ready`);
         // logger.info(`set server ${this._backend}/${this._serverName} state ready`);
         // return this._apply(`set server ${this._backend}/${this._serverName} state ready`);
-        console.log(`enable server ${this._backend}/${this._serverName}`);
-        logger.info(`enable server ${this._backend}/${this._serverName}`);
+        console.log(`enable server ${this._host} ${this._backend}/${this._serverName}`);
+        logger.info(`enable server ${this._host} ${this._backend}/${this._serverName}`);
         return this._apply(`enable server ${this._backend}/${this._serverName}`);
     }
 
@@ -52,20 +52,20 @@ class HAStats {
         // return this._apply(`set server ${this._backend}/${this._serverName} state maint`);
         // return this._apply(`set server ${this._backend}/${this._serverName} state drain`);
         // return this._apply(`set server ${this._backend}/${this._serverName} agent down`);
-        console.log(`disable server ${this._backend}/${this._serverName}`);
-        logger.info(`disable server ${this._backend}/${this._serverName}`);
+        console.log(`disable server ${this._host} ${this._backend}/${this._serverName}`);
+        logger.info(`disable server ${this._host} ${this._backend}/${this._serverName}`);
         return this._apply(`disable server ${this._backend}/${this._serverName}`);
     }
 
     shutdownSession() {
-        console.log(`shutdown sessions server ${this._backend}/${this._serverName}`);
-        logger.info(`shutdown sessions server ${this._backend}/${this._serverName}`);
+        console.log(`shutdown sessions server ${this._host} ${this._backend}/${this._serverName}`);
+        logger.info(`shutdown sessions server ${this._host} ${this._backend}/${this._serverName}`);
         return this._apply(`shutdown sessions server ${this._backend}/${this._serverName}`);
     }    
 
     showState() {
-        console.log(`server ${this._backend}/${this._serverName}: echo "show servers state" | socat stdio tcp4-connect:${this._host}:${this._port}`);
-        logger.info(`server ${this._backend}/${this._serverName}: echo "show servers state" | socat stdio tcp4-connect:${this._host}:${this._port}`);
+        console.log(`server ${this._host} ${this._backend}/${this._serverName}: echo "show servers state" | socat stdio tcp4-connect:${this._host}:${this._port}`);
+        logger.info(`server ${this._host} ${this._backend}/${this._serverName}: echo "show servers state" | socat stdio tcp4-connect:${this._host}:${this._port}`);
         return this._apply('show servers state');  
     }
 
@@ -129,7 +129,7 @@ hs.backend("servers").server('test1').enable();
 
 
 
-// hs.backend("neo4j_servers").server('server_b').address("10.10.15.27",7687);
+// hs.backend("neo4j_servers").server('server_b').address("10.10.17.10",7688);
 
 // hs.backend("neo4j_servers").server('server_b').enable();
 

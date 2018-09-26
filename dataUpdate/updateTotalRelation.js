@@ -152,6 +152,10 @@ function stripscript(s) {
     for (let i = 0; i < s.length; i++) {
         rs = rs + s.substr(i, 1).replace(pattern, '');
     }
+    //去除,"、和前后空格符
+    rs = (((rs.replace(/,/g, '')).replace(/"/g, '')).replace(/\n/g, '')).replace(/(^\s*)|(\s*$)/g, "");
+    //去除隐含的特殊字符
+    rs = rs.replace(/\u0000|\u0001|\u0002|\u0003|\u0004|\u0005|\u0006|\u0007|\u0008|\u0009|\u000a|\u000b|\u000c|\u000d|\u000e|\u000f|\u0010|\u0011|\u0012|\u0013|\u0014|\u0015|\u0016|\u0017|\u0018|\u0019|\u001a|\u001b|\u001c|\u001d|\u001e|\u001f/g, "");
     return rs;
 }
 
@@ -173,8 +177,109 @@ let updateTotalRelation = {
         return extraNodeW;
     },
 
+    //初始化persons.csv文件
+    initPersonsCSV: function () {
+        //自然人的nodes
+        let CSVFilePath = '../neo4jDB_update/totalData/persons.csv';
+        let personW = writeLineStream(fs.createWriteStream(CSVFilePath), {
+            // 换行符，默认\n
+            newline: '\n',
+            // 编码器，可以为函数或字符串（内置编码器：json，base64），默认null
+            encoding: function (data) {
+                return data;
+            },
+            // 缓存的行数，默认为0（表示不缓存），此选项主要用于优化写文件性能，当数量缓存的内容超过该数量时再一次性写入到流中，可以提高写速度
+            cacheLines: 0
+        });
+        return personW;
+    },
+
+    //初始化relation_invest.csv文件
+    initInvestCSV: function () {
+        let CSVFilePathInvest = '../neo4jDB_update/totalData/relations_invest.csv';
+        // writeLineStream第一个参数为ReadStream实例，也可以为文件名
+        let investW = writeLineStream(fs.createWriteStream(CSVFilePathInvest), {
+            // 换行符，默认\n
+            newline: '\n',
+            // 编码器，可以为函数或字符串（内置编码器：json，base64），默认null
+            encoding: function (data) {
+                return data;
+            },
+            // 缓存的行数，默认为0（表示不缓存），此选项主要用于优化写文件性能，当数量缓存的内容超过该数量时再一次性写入到流中，可以提高写速度
+            cacheLines: 0
+        });
+        return investW;
+    },
+
+    //读取CRDB的tCR0063表建立personalCode->ITCode2的字典数据
+    startFormHolderDict: async function (flag) {
+        if (flag) {
+            try {
+                //清空personalCode->ITCode2字典数据
+                transactions.flushHolderDict();
+                let id = config.updateInfo.relationId_holder;
+                let i = 1;
+                let ctx = await transactions.getContext(id);
+                let fetched = 0;
+                if (!ctx.last)
+                    ctx.last = 0;
+                let resultCount = 0;
+                let startTime = Date.now();
+                let updateInfo = {};
+                let updateStatus = 0;
+                do {
+                    let rows = [];
+                    let now = Date.now();
+                    let sql = `
+                                select top 10000 cast(tmstamp as bigint) as _ts,ITCode2,PersonalCode from [tCR0063] WITH(READPAST) 
+                                where ITCode2 is not null and PersonalCode is not null and flag<> 1 and tmstamp > cast( cast(${ctx.last} as bigint) as binary(8)) order by tmstamp;
+                              `;
+                    let res = await Mssql.connect(config.mssql).query(sql);
+                    let queryCost = Date.now() - now;
+                    rows = res.recordset;
+                    fetched = rows.length;                                                                   //每次查询SQL Server的实际记录数
+                    if (fetched > 0) {
+                        resultCount += fetched;
+                        for (let i = 0; i < rows.length; i++) {
+                            let startId = rows[i].PersonalCode;
+                            let endId = rows[i].ITCode2;
+                            transactions.saveHolderDict(startId, endId);
+                        }
+                        ctx.last = rows[fetched - 1]._ts;
+                        ctx.updatetime = now;
+                        ctx.latestUpdated = resultCount;
+
+                        // 保存同步到的位置
+                        transactions.saveContext(id, ctx)
+                            .catch(err => console.error(err));
+                        if (fetched > 0)
+                            logger.info(`Total table: 'tCR0063' qry:${queryCost} ms; result:${fetched}` + ', 读写次数: ' + i + ', last timestamp: ' + ctx.last);
+                        console.log('全量更新表tCR0063中relation信息,读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms' + ', last timestamp: ' + ctx.last);
+                        i++;
+
+                        //for test
+                        // if(i == 2 )
+                        //     break;
+                    }
+                } while (fetched >= 10000);
+                let totalCost = Date.now() - startTime;
+                let logInfo = '全量更新表tCR0063中relation信息, 总耗时: ' + totalCost + ', 更新记录数: ' + resultCount;
+                updateStatus = 1;
+                updateInfo.status = updateStatus;
+                updateInfo.info = logInfo;
+                logger.info(`counts: ` + i++ + `, totalConst :${totalCost} ms; resultCount: ${resultCount}`);
+                console.log(logInfo);
+                return updateInfo;
+            } catch (err) {
+                console.error(err);
+                logger.error(err);
+                return err;
+            }
+        }
+    },
+
     //投资关系
-    startQueryInvestRelation: async function (flag, extraNodeW) {
+    startQueryInvestRelation: async function (flag, extraNodeW, personW, investW) {
         if (flag) {
             try {
                 //set汇率转换
@@ -187,34 +292,30 @@ let updateTotalRelation = {
                 let i = 1;
                 let ctx = await transactions.getContext(id);
                 let fetched = 0;
+                let filtered = 0;
                 if (!ctx.last)
                     ctx.last = 0;
                 let resultCount = 0;
                 let startTime = Date.now();
                 let updateInfo = {};
                 let updateStatus = 0;
-                let CSVFilePathInvest = '../neo4jDB_update/totalData/relations_invest.csv';
-                // writeLineStream第一个参数为ReadStream实例，也可以为文件名
-                let investW = writeLineStream(fs.createWriteStream(CSVFilePathInvest), {
-                    // 换行符，默认\n
-                    newline: '\n',
-                    // 编码器，可以为函数或字符串（内置编码器：json，base64），默认null
-                    encoding: function (data) {
-                        return data;
-                    },
-                    // 缓存的行数，默认为0（表示不缓存），此选项主要用于优化写文件性能，当数量缓存的内容超过该数量时再一次性写入到流中，可以提高写速度
-                    cacheLines: 0
-                });
-
-                let line1 = ':START_ID,relation:TYPE,weight:float,subAmountRMB:float,subAmount:float,subAmountUnit:string,:END_ID';
+                let line1 = 'timestamp:string,:START_ID,relation:TYPE,weight:float,subAmountRMB:float,subAmount:float,subAmountUnit:string,:END_ID';
                 investW.write(line1);
+
+                let personLine1 = 'isPerson:string,ITCode2:ID,name:string,isExtra:string,originTable:string';
+                personW.write(personLine1);
+                let isPerson = 0;                                                                   //0代表不是自然人  
+                let isExtra = 0;                                                                    //0代表有机构代码
+                let startIsBranches = 0;                                                            //初始化分支机构属性,0表示不是分支机构，1表示是分支机构
+                let endIsBranches = 0;                                                              //无机构代码的默认非分支机构
+                let surStatus = 1;                                                                  //续存状态默认为1                          
+                let originTable = 'tCR0002_V2.0';                                                   //数据来源 
+                let RMBFund = 0;
+                let regFund = 0;
+                let regFundUnit = 'null';
                 do {
                     let rows = [];
                     let now = Date.now();
-                    // let sql = `
-                    //             select top 10000 cast(tmstamp as bigint) as _ts,ITCode2,CR0002_011,CR0002_004 from [tCR0002_V2.0] WITH(READPAST) 
-                    //             where ITCode2 is not null and CR0002_011 is not null and (CR0002_003 <>'无' and CR0002_003 <>'***' )and flag<> 1 and tmstamp > cast( cast(${ctx.last} as bigint) as binary(8)) order by tmstamp;
-                    //                 `;
                     let sql = `
                                 select top 10000 cast(tmstamp as bigint) as _ts,ITCode2,ITName,CR0002_011,CR0002_003,CR0002_004,CR0002_007,CR0002_008,PersonalCode from [tCR0002_V2.0] WITH(READPAST) 
                                 where flag<> 1 and tmstamp > cast( cast(${ctx.last} as bigint) as binary(8)) order by tmstamp;
@@ -222,8 +323,7 @@ let updateTotalRelation = {
                     let res = await Mssql.connect(config.mssql).query(sql);
                     let queryCost = Date.now() - now;
                     rows = res.recordset;
-                    fetched = rows.length;                                                               //每次查询SQL Server的实际记录数
-                    let writeCost = 0;
+                    fetched = rows.length;                                                                   //每次查询SQL Server的实际记录数
                     if (fetched > 0) {
                         resultCount += fetched;
                         for (let i = 0; i < rows.length; i++) {
@@ -233,7 +333,7 @@ let updateTotalRelation = {
                             let subAmount = rows[i].CR0002_007;
                             let subAmountUnit = rows[i].CR0002_008;
                             let perCode = rows[i].PersonalCode;
-                            let isPerson = 0;                                                                 //0代表不是自然人                      
+                            let timestamp = rows[i]._ts;
                             if (!holdWeight) holdWeight = 0;
                             if (!subAmount) subAmount = 0;
                             if (!subAmountUnit) subAmountUnit = '万人民币元';
@@ -248,60 +348,65 @@ let updateTotalRelation = {
                                 rateValue = parseFloat(rateValueMap[`${rate}`]);
                             }
                             let subAmountRMB = subAmount * rateValue;
-                            let isExtra = 0;                                                                    //0代表有机构代码
-                            let startIsBranches = 0;                                                            //初始化分支机构属性,0表示不是分支机构，1表示是分支机构
-                            let endIsBranches = 0;                                                              //无机构代码的默认非分支机构
-                            let surStatus = 1;                                                                  //续存状态默认为1                          
                             if (!startId && !perCode) {                                                         //机构代码CR0002_011为空，并且PersonalCode为空时，则该机构随机生成ID
                                 // let id = UUID.v4();
                                 // let id = transactions.createRndNum(12);                                      //产生12位随机数作为ITCode
                                 let id = rows[i]._ts + transactions.createRndNum(6);
                                 startId = id;
-                                let name = ((((rows[i].CR0002_003).replace(/,/g, '')).replace(/"/g, '')).replace(/\n/g, '')).replace(/(^\s*)|(\s*$)/g, "");   //去除,"、和前后空格符
-                                name = stripscript(name);                                                                                                     //过滤特殊字符
-                                name = name.replace(/\u0000|\u0001|\u0002|\u0003|\u0004|\u0005|\u0006|\u0007|\u0008|\u0009|\u000a|\u000b|\u000c|\u000d|\u000e|\u000f|\u0010|\u0011|\u0012|\u0013|\u0014|\u0015|\u0016|\u0017|\u0018|\u0019|\u001a|\u001b|\u001c|\u001d|\u001e|\u001f/g, "");
+                                let startName = rows[i].CR0002_003;
+                                let name = stripscript(startName);                                              //过滤特殊字符
                                 if (!name) name = 'others';
                                 isExtra = 1;                                                                   //1代表没有机构代码
-                                let RMBFund = 0;
-                                let regFund = 0;
-                                let regFundUnit = 'null';
-                                let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${startIsBranches}`;
+                                let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${originTable},${startIsBranches}`;
                                 extraNodeW.write(extraLineN);
                             }
                             if (perCode) {                                                                     //PersonalCode不为空时，则为自然人，ID用PersonalCode代替
-                                let personCode = perCode.replace(/P/g, '');                                     //personCode去掉P，转成int型
-                                let id = parseInt(personCode);                                                 //将PersonalCode中的P替换成1组成int型
-                                startId = id;
-                                let name = ((((rows[i].CR0002_003).replace(/,/g, '')).replace(/"/g, '')).replace(/\n/g, '')).replace(/(^\s*)|(\s*$)/g, "");   //去除,"、和前后空格符
-                                name = stripscript(name);                                                                                                     //过滤特殊字符
-                                name = name.replace(/\u0000|\u0001|\u0002|\u0003|\u0004|\u0005|\u0006|\u0007|\u0008|\u0009|\u000a|\u000b|\u000c|\u000d|\u000e|\u000f|\u0010|\u0011|\u0012|\u0013|\u0014|\u0015|\u0016|\u0017|\u0018|\u0019|\u001a|\u001b|\u001c|\u001d|\u001e|\u001f/g, "");
+                                startId = perCode;
+                                let startName = rows[i].CR0002_003;
+                                let name = stripscript(startName);                                                  //过滤特殊字符
                                 if (!name) name = 'others';
                                 isExtra = 1;
-                                isPerson = 1;                                                                  //1代表是自然人
-                                let RMBFund = 0;
-                                let regFund = 0;
-                                let regFundUnit = 'null';
-                                let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${startIsBranches}`;
-                                extraNodeW.write(extraLineN);
+                                let personLineN = `1,${perCode},${name},${isExtra},${originTable}`;
+                                personW.write(personLineN);
                             }
                             if (!endId) {
                                 // let id = UUID.v4();
                                 // let id = transactions.createRndNum(12);                                          //产生12位随机数作为ITCode
                                 let id = transactions.createRndNum(6) + rows[i]._ts;
                                 endId = id;
-                                let name = ((((rows[i].ITName).replace(/,/g, '')).replace(/"/g, '')).replace(/\n/g, '')).replace(/(^\s*)|(\s*$)/g, "");   //去除,"、和前后空格符
-                                name = stripscript(name);
-                                name = name.replace(/\u0000|\u0001|\u0002|\u0003|\u0004|\u0005|\u0006|\u0007|\u0008|\u0009|\u000a|\u000b|\u000c|\u000d|\u000e|\u000f|\u0010|\u0011|\u0012|\u0013|\u0014|\u0015|\u0016|\u0017|\u0018|\u0019|\u001a|\u001b|\u001c|\u001d|\u001e|\u001f/g, "");
+                                let endName = rows[i].ITName;
+                                let name = stripscript(endName);
                                 if (!name) name = 'others';
                                 isExtra = 1;
-                                let RMBFund = 0;
-                                let regFund = 0;
-                                let regFundUnit = 'null';
-                                let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${endIsBranches}`;
+                                // let RMBFund = 0;
+                                // let regFund = 0;
+                                // let regFundUnit = 'null';
+                                let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${originTable},${endIsBranches}`;
                                 extraNodeW.write(extraLineN);
                             }
-                            let lineN = `${startId},invests,${holdWeight},${subAmountRMB},${subAmount},${subAmountUnit},${endId}`;
-                            investW.write(lineN);
+                            if (perCode) {
+                                let list = await transactions.getHolderDict(perCode);
+                                if (list.length > 0) {
+                                    if (-1 != list.indexOf(endId)) {
+                                        let lineN = `${timestamp},${startId},invests,${holdWeight},${subAmountRMB},${subAmount},${subAmountUnit},${endId}`;
+                                        investW.write(lineN);
+                                    }
+                                    else {
+                                        filtered ++;
+                                        // console.log('过滤PersonalCode: ' + startId + ', ITCode2: ' + endId +'，PersonalCode对应不到此ITCode2' +', timestamp: ' +timestamp +', 过滤记录数: ' +filtered);
+                                        // logger.info('过滤PersonalCode: ' + startId + ', ITCode2: ' + endId +'，PersonalCode对应不到此ITCode2' +', timestamp: ' +timestamp);
+                                    }
+                                }
+                                else {
+                                    filtered ++;
+                                    // console.log('过滤PersonalCode: ' + startId + ', ITCode2: ' + endId +'，PersonalCode不在tCR0063表中' +', timestamp: ' +timestamp +', 过滤记录数: ' +filtered);
+                                    // logger.info('过滤PersonalCode: ' + startId + ', ITCode2: ' + endId +'，PersonalCode不在tCR0063表中' +', timestamp: ' +timestamp);
+                                }
+                            }
+                            else if (!perCode) {
+                                let lineN = `${timestamp},${startId},invests,${holdWeight},${subAmountRMB},${subAmount},${subAmountUnit},${endId}`;
+                                investW.write(lineN);
+                            }
                         }
                         ctx.last = rows[fetched - 1]._ts;
                         ctx.updatetime = now;
@@ -311,27 +416,27 @@ let updateTotalRelation = {
                         transactions.saveContext(id, ctx)
                             .catch(err => console.error(err));
                         if (fetched > 0)
-                            logger.info(`Total table: 'tCR0002_V2.0' qry:${queryCost} ms; result:${fetched}` + ', 读写次数: ' + i);
-                        console.log('全量更新表tCR0002_V2.0中relation信息,读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms');
+                            logger.info(`Total table: 'tCR0002_V2.0' qry:${queryCost} ms; result:${fetched}` + ', 读写次数: ' + i + ', last timestamp: ' + ctx.last);
+                        console.log('全量更新表tCR0002_V2.0中relation信息,读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms' + ', last timestamp: ' + ctx.last);
                         i++;
 
                         //for test
-                        // if(i == 200 )
+                        // if(i == 2 )
                         //     break;
                     }
                 } while (fetched >= 10000);
                 // 结束
                 investW.end(function () {
                     // 回调函数可选
-                    console.log('invest.csv write end');
-                    logger.info('invest.csv write end');
+                    console.log('relations_invest.csv write end');
+                    logger.info('relations_invest.csv write end');
                 });
                 let totalCost = Date.now() - startTime;
-                let logInfo = '全量更新表tCR0002_V2.0中relation信息, 总耗时: ' + totalCost + ', 更新记录数: ' + resultCount;
+                let logInfo = '全量更新表tCR0002_V2.0中relation信息, 总耗时: ' + totalCost + ', 更新记录数: ' + resultCount +', 过滤总记录数: ' +filtered;
                 updateStatus = 1;
                 updateInfo.status = updateStatus;
                 updateInfo.info = logInfo;
-                logger.info(`counts: ` + i++ + `, totalConst :${totalCost} ms; resultCount: ${resultCount}`);
+                logger.info(`counts: ` + i++ + `, totalConst :${totalCost} ms; resultCount: ${resultCount}; 过滤总记录数: ${filtered}`);
                 console.log(logInfo);
                 return updateInfo;
             } catch (err) {
@@ -368,18 +473,23 @@ let updateTotalRelation = {
                     // 缓存的行数，默认为0（表示不缓存），此选项主要用于优化写文件性能，当数量缓存的内容超过该数量时再一次性写入到流中，可以提高写速度
                     cacheLines: 0
                 });
-                let line1 = ':START_ID,relation:TYPE,:END_ID';
+                let line1 = 'timestamp:string,:START_ID,relation:TYPE,:END_ID,weight:float';
                 w.write(line1);
 
-                let extraLine1 = 'isPerson:string,ITCode2:ID,name:string,RMBFund:float,regFund:float,regFundUnit:string,isExtra:string,surStatus:string,isBranches:string';
+                let extraLine1 = 'isPerson:string,ITCode2:ID,name:string,RMBFund:float,regFund:float,regFundUnit:string,isExtra:string,surStatus:string,originTable:string,isBranches:string';
                 extraNodeW.write(extraLine1);
+                let startIsBranches = 0;                                                            //初始化分支机构属性,0表示不是分支机构，1表示是分支机构
+                let endIsBranches = 0;                                                              //无机构代码的默认非分支机构
+                let isExtra = 0;
+                let isPerson = 0;
+                let surStatus = 1;                                                                  //续存状态默认为1
+                let originTable = 'tCR0008_V2.0';
+                let RMBFund = 0;
+                let regFund = 0;
+                let regFundUnit = 'null';
                 do {
                     let rows = [];
                     let now = Date.now();
-                    // let sql = `
-                    //             select top 10000 cast(tmstamp as bigint) as _ts,ITCode2,CR0002_011,CR0002_004 from [tCR0002_V2.0] WITH(READPAST) 
-                    //             where ITCode2 is not null and CR0002_011 is not null and (CR0002_003 <>'无' and CR0002_003 <>'***' )and flag<> 1 and tmstamp > cast( cast(${ctx.last} as bigint) as binary(8)) order by tmstamp;
-                    //                 `;
                     let sql = `
                                 select top 10000 cast(tmstamp as bigint) as _ts,ITCode2,ITName,CR0008_003,CR0008_002 from [tCR0008_V2.0] WITH(READPAST) 
                                 where flag<> 1 and tmstamp > cast( cast(${ctx.last} as bigint) as binary(8)) order by tmstamp;
@@ -388,31 +498,25 @@ let updateTotalRelation = {
                     let queryCost = Date.now() - now;
                     rows = res.recordset;
                     fetched = rows.length;      //每次查询SQL Server的实际记录数
-                    let writeCost = 0;
                     if (fetched > 0) {
                         resultCount += fetched;
                         for (let i = 0; i < rows.length; i++) {
                             let startId = rows[i].ITCode2;
                             let endId = rows[i].CR0008_003;
-                            let startIsBranches = 0;                                                            //初始化分支机构属性,0表示不是分支机构，1表示是分支机构
-                            let endIsBranches = 0;                                                              //无机构代码的默认非分支机构
-                            let isExtra = 0;
-                            let isPerson = 0;
-                            let surStatus = 1;                                                                  //续存状态默认为1
+                            let timestamp = rows[i]._ts;
                             if (!startId) {
                                 // let id = UUID.v4();
                                 // let id = transactions.createRndNum(12);                                      //产生12位随机数作为ITCode
                                 let id = rows[i]._ts + transactions.createRndNum(6);
                                 startId = id;
-                                let name = ((((rows[i].ITName).replace(/,/g, '')).replace(/"/g, '')).replace(/\n/g, '')).replace(/(^\s*)|(\s*$)/g, "");   //去除,"、和前后空格符
-                                name = stripscript(name);
-                                name = name.replace(/\u0000|\u0001|\u0002|\u0003|\u0004|\u0005|\u0006|\u0007|\u0008|\u0009|\u000a|\u000b|\u000c|\u000d|\u000e|\u000f|\u0010|\u0011|\u0012|\u0013|\u0014|\u0015|\u0016|\u0017|\u0018|\u0019|\u001a|\u001b|\u001c|\u001d|\u001e|\u001f/g, "");
+                                let startName = rows[i].ITName;
+                                let name = stripscript(startName);
                                 if (!name) name = 'others';
                                 isExtra = 1;
-                                let RMBFund = 0;
-                                let regFund = 0;
-                                let regFundUnit = 'null';
-                                let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${startIsBranches}`;
+                                // let RMBFund = 0;
+                                // let regFund = 0;
+                                // let regFundUnit = 'null';
+                                let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${originTable},${startIsBranches}`;
                                 extraNodeW.write(extraLineN);
                             }
                             if (!endId) {
@@ -420,18 +524,17 @@ let updateTotalRelation = {
                                 // let id = transactions.createRndNum(12);                                          //产生12位随机数作为ITCode
                                 let id = transactions.createRndNum(6) + rows[i]._ts;
                                 endId = id;
-                                let name = ((((rows[i].CR0008_002).replace(/,/g, '')).replace(/"/g, '')).replace(/\n/g, '')).replace(/(^\s*)|(\s*$)/g, "");   //去除,"、和前后空格符
-                                name = stripscript(name);
-                                name = name.replace(/\u0000|\u0001|\u0002|\u0003|\u0004|\u0005|\u0006|\u0007|\u0008|\u0009|\u000a|\u000b|\u000c|\u000d|\u000e|\u000f|\u0010|\u0011|\u0012|\u0013|\u0014|\u0015|\u0016|\u0017|\u0018|\u0019|\u001a|\u001b|\u001c|\u001d|\u001e|\u001f/g, "");
+                                let endName = rows[i].CR0008_002;
+                                let name = stripscript(endName);
                                 if (!name) name = 'others';
                                 isExtra = 1;
-                                let RMBFund = 0;
-                                let regFund = 0;
-                                let regFundUnit = 'null';
-                                let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${endIsBranches}`;
+                                // let RMBFund = 0;
+                                // let regFund = 0;
+                                // let regFundUnit = 'null';
+                                let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${originTable},${endIsBranches}`;
                                 extraNodeW.write(extraLineN);
                             }
-                            let lineN = `${startId},guarantees,${endId}`;
+                            let lineN = `${timestamp},${startId},guarantees,${endId},0`;
                             w.write(lineN);
                         }
                         ctx.last = rows[fetched - 1]._ts;
@@ -442,16 +545,20 @@ let updateTotalRelation = {
                         transactions.saveContext(id, ctx)
                             .catch(err => console.error(err));
                         if (fetched > 0)
-                            logger.info(`Total table: 'tCR0008_V2.0' qry:${queryCost} ms; result:${fetched}` + ', 读写次数: ' + i);
-                        console.log('全量更新表tCR0008_V2.0中guarantee信息,读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms');
+                            logger.info(`Total table: 'tCR0008_V2.0' qry:${queryCost} ms; result:${fetched}` + ', 读写次数: ' + i + ', last timestamp: ' + ctx.last);
+                        console.log('全量更新表tCR0008_V2.0中guarantee信息,读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms' + ', last timestamp: ' + ctx.last);
                         i++;
+
+                        //for test
+                        // if(i == 2 )
+                        //     break;
                     }
                 } while (fetched >= 10000);
                 // 结束
                 w.end(function () {
                     // 回调函数可选
-                    console.log('guarantee.csv write end');
-                    logger.info('guarantee.csv write end');
+                    console.log('relations_guarantee.csv write end');
+                    logger.info('relations_guarantee.csv write end');
                 });
                 let totalCost = Date.now() - startTime;
                 let logInfo = '全量更新表tCR0008_V2.0中guarantee信息, 总耗时: ' + totalCost + 'ms' + ', 更新记录数: ' + resultCount;
@@ -461,6 +568,252 @@ let updateTotalRelation = {
                 logger.info(`counts: ` + i++ + `, totalConst :${totalCost} ms; resultCount: ${resultCount}`);
                 console.log(logInfo);
                 logger.info(logInfo);
+                return updateInfo;
+            } catch (err) {
+                console.error(err);
+                logger.error(err);
+                return err;
+            }
+        }
+    },
+
+    //家族关系
+    startQueryFamilyRelation: async function (flag, personW) {
+        if (flag) {
+            try {
+                let id = config.updateInfo.relationId_family;
+                let i = 1;
+                let ctx = await transactions.getContext(id);
+                let fetched = 0;
+                if (!ctx.last)
+                    ctx.last = 0;
+                let resultCount = 0;
+                let startTime = Date.now();
+                let updateInfo = {};
+                let updateStatus = 0;
+                let CSVFilePath = '../neo4jDB_update/totalData/relations_family.csv';
+                // writeLineStream第一个参数为ReadStream实例，也可以为文件名
+                let familyW = writeLineStream(fs.createWriteStream(CSVFilePath), {
+                    // 换行符，默认\n
+                    newline: '\n',
+                    // 编码器，可以为函数或字符串（内置编码器：json，base64），默认null
+                    encoding: function (data) {
+                        return data;
+                    },
+                    // 缓存的行数，默认为0（表示不缓存），此选项主要用于优化写文件性能，当数量缓存的内容超过该数量时再一次性写入到流中，可以提高写速度
+                    cacheLines: 0
+                });
+                let familyLine1 = 'timestamp:string,:START_ID,relation:TYPE,:END_ID,relationCode:int,relationName:string,weight:float';
+                familyW.write(familyLine1);
+
+                let isExtra = 1;                                                    //isExtra = 1用来区分有无ITCode2
+                let isPerson = 1;
+                let originTable = 'tCR0058';
+                do {
+                    let rows = [];
+                    let now = Date.now();
+                    let sql = `
+                                select top 10000 cast(tmstamp as bigint) as _ts,PersonalCode,Cname,PersonalCode2,Cname2,CR0058_001,CR0058_002 from [tCR0058] WITH(READPAST) 
+                                where flag<> 1 and tmstamp > cast( cast(${ctx.last} as bigint) as binary(8)) order by tmstamp;
+                              `;
+                    let res = await Mssql.connect(config.mssql).query(sql);
+                    let queryCost = Date.now() - now;
+                    rows = res.recordset;
+                    fetched = rows.length;                                              //每次查询SQL Server的实际记录数
+                    if (fetched > 0) {
+                        resultCount += fetched;
+                        for (let i = 0; i < rows.length; i++) {
+                            let startId = rows[i].PersonalCode;
+                            let perName1 = rows[i].Cname;
+                            let endId = rows[i].PersonalCode2;
+                            let perName2 = rows[i].Cname2;
+                            let relationCode = rows[i].CR0058_001;
+                            let relationName = rows[i].CR0058_002;
+                            let timestamp = rows[i]._ts;
+                            if (!perName1) {
+                                perName1 = 'others';
+                            }
+                            else if (perName1) {
+                                perName1 = stripscript(perName1);
+                            }
+                            if (!perName2) {
+                                perName2 = 'others';
+                            }
+                            else if (perName2) {
+                                perName2 = stripscript(perName2);
+                            }
+                            if (!relationCode) relationCode = 0;
+                            if (!relationName) relationName = 'others';
+                            if (!startId) {
+                                startId = rows[i]._ts + transactions.createRndNum(6);
+                            }
+                            // else if (startId) {
+                            //     startId = parseInt(startId.replace(/P/g, ''));                                     //personCode去掉P，转成int型
+                            // }
+                            if (!endId) {
+                                endId = rows[i]._ts + transactions.createRndNum(6);
+                            }
+                            // else if (endId) {
+                            //     endId = parseInt(endId.replace(/P/g, '')); 
+                            // }
+                            //写relation_family.csv文件
+                            let familyLineN = `${timestamp},${startId},family,${endId},${relationCode},${relationName},0`;
+                            familyW.write(familyLineN);
+                            //写persons.csv文件
+                            let personLineN1 = `${isPerson},${startId},${perName1},${isExtra},${originTable}`;
+                            personW.write(personLineN1);
+                            let personLineN2 = `${isPerson},${endId},${perName2},${isExtra},${originTable}`;
+                            personW.write(personLineN2);
+                        }
+                        ctx.last = rows[fetched - 1]._ts;
+                        ctx.updatetime = now;
+                        ctx.latestUpdated = resultCount;
+                        // 保存同步到的位置
+                        transactions.saveContext(id, ctx).catch(err => console.error(err));
+                        console.log('全量更新表tCR0058中relation信息,读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms' + ', last timestamp: ' + ctx.last);
+                        logger.info(`total table: 'tCR0058' qry:${queryCost} ms; result:${fetched}` + ', 读写次数: ' + i + ', last timestamp: ' + ctx.last);
+                        i++;
+                    }
+                } while (fetched >= 10000);
+                //写relations_famliy.CSV文件结束
+                familyW.end(function () {
+                    console.log('relations_family.csv write end');
+                    logger.info('relations_family.csv write end');
+                });
+                let totalCost = Date.now() - startTime;
+                let logInfo = '全量更新表tCR0058中relation信息, 总耗时: ' + totalCost + ', 更新记录数: ' + resultCount;
+                updateStatus = 1;
+                updateInfo.status = updateStatus;
+                updateInfo.info = logInfo;
+                logger.info(`counts: ` + i++ + `, totalConst :${totalCost} ms; resultCount: ${resultCount}`);
+                console.log(logInfo);
+                return updateInfo;
+            } catch (err) {
+                console.error(err);
+                logger.error(err);
+                return err;
+            }
+        }
+    },
+
+    //高管投资关系
+    startQueryExecutiveInvestRelation: async function (flag, extraNodeW, personW) {
+        if (flag) {
+            try {
+                let id = config.updateInfo.relationId_executive;
+                let i = 1;
+                let ctx = await transactions.getContext(id);
+                let fetched = 0;
+                if (!ctx.last)
+                    ctx.last = 0;
+                let resultCount = 0;
+                let startTime = Date.now();
+                let updateInfo = {};
+                let updateStatus = 0;
+                let CSVFilePath = '../neo4jDB_update/totalData/relations_execute.csv';
+                // writeLineStream第一个参数为ReadStream实例，也可以为文件名
+                let executeW = writeLineStream(fs.createWriteStream(CSVFilePath), {
+                    // 换行符，默认\n
+                    newline: '\n',
+                    // 编码器，可以为函数或字符串（内置编码器：json，base64），默认null
+                    encoding: function (data) {
+                        return data;
+                    },
+                    // 缓存的行数，默认为0（表示不缓存），此选项主要用于优化写文件性能，当数量缓存的内容超过该数量时再一次性写入到流中，可以提高写速度
+                    cacheLines: 0
+                });
+                let executeLine1 = 'timestamp:string,:START_ID,relation:TYPE,:END_ID,weight:float';
+                executeW.write(executeLine1);
+                let isExtra = 1;                                                                    //0代表有机构代码
+                let isBranches = 0;                                                                 //初始化分支机构属性,0表示不是分支机构，1表示是分支机构
+                let surStatus = 1;                                                                  //续存状态默认为1                          
+                let originTable = 'tCR0064';                                                        //数据来源 
+                let RMBFund = 0;
+                let regFund = 0;
+                let regFundUnit = 'null';
+                do {
+                    let rows = [];
+                    let now = Date.now();
+                    let sql = `
+                                select top 10000 cast(tmstamp as bigint) as _ts,PersonalCode,Cname,ITCode2,ITName from [tCR0064] WITH(READPAST) 
+                                where flag<> 1 and tmstamp > cast( cast(${ctx.last} as bigint) as binary(8)) order by tmstamp;                    
+                              `;
+                    let res = await Mssql.connect(config.mssql).query(sql);
+                    let queryCost = Date.now() - now;
+                    rows = res.recordset;
+                    fetched = rows.length;                                                                   //每次查询SQL Server的实际记录数
+                    if (fetched > 0) {
+                        resultCount += fetched;
+                        for (let i = 0; i < rows.length; i++) {
+                            let startId = rows[i].PersonalCode;
+                            let endId = rows[i].ITCode2;
+                            let personName = rows[i].Cname;
+                            let compName = rows[i].ITName;
+                            let timestamp = rows[i]._ts;
+                            if (null != personName || '' != personName) {
+                                personName = stripscript(personName);                                       //过滤特殊字符
+                            }
+                            else if (!personName && startId) {
+                                personName = 'others';
+                            }
+                            if (!endId && (null != compName || '' != compName)) {
+                                endId = rows[i]._ts + transactions.createRndNum(6);
+                                name = stripscript(compName);
+                                let extraLineN = `0,${endId},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${originTable},${isBranches}`;
+                                extraNodeW.write(extraLineN);                                              //过滤特殊字符
+                            }
+                            if (!startId && (null != personName || '' != personName)) {
+                                startId = rows[i]._ts + transactions.createRndNum(6);
+                            }
+                            //写relations_execute.csv文件
+                            let executeLineN = `${timestamp},${startId},executes,${endId},0`;
+                            executeW.write(executeLineN);
+
+                            //写persons.csv文件
+                            let personLineN = `1,${startId},${personName},${isExtra},${originTable}`;
+                            personW.write(personLineN);
+                        }
+                        ctx.last = rows[fetched - 1]._ts;
+                        ctx.updatetime = now;
+                        ctx.latestUpdated = resultCount;
+
+                        // 保存同步到的位置
+                        transactions.saveContext(id, ctx)
+                            .catch(err => console.error(err));
+                        if (fetched > 0)
+                            logger.info(`total table: 'tCR0064' qry:${queryCost} ms; result:${fetched}` + ', 读写次数: ' + i + ', last timestamp: ' + ctx.last);
+                        console.log('全量更新表tCR0064中relation信息,读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms' + ', last timestamp: ' + ctx.last);
+                        i++;
+
+                        //for test
+                        // if(i == 2 )
+                        //     break;
+                    }
+                } while (fetched >= 10000);
+                // 写relations_execute.scv文件结束
+                executeW.end(function () {
+                    // 回调函数可选
+                    console.log('relations_execute.csv write end');
+                    logger.info('relations_execute.csv write end');
+                });
+                // 写persons.csv文件结束
+                personW.end(function () {
+                    // 回调函数可选
+                    console.log('persons.csv write end');
+                    logger.info('persons.csv write end');
+                });
+                // 写extraNodes.csv文件结束
+                extraNodeW.end(function () {
+                    console.log('extraNodes.csv write end');
+                    logger.info('extraNodes.csv write end');
+                })
+                let totalCost = Date.now() - startTime;
+                let logInfo = '全量更新表tCR0064中relation信息, 总耗时: ' + totalCost + ', 更新记录数: ' + resultCount;
+                updateStatus = 1;
+                updateInfo.status = updateStatus;
+                updateInfo.info = logInfo;
+                logger.info(`counts: ` + i++ + `, totalConst :${totalCost} ms; resultCount: ${resultCount}`);
+                console.log(logInfo);
                 return updateInfo;
             } catch (err) {
                 console.error(err);

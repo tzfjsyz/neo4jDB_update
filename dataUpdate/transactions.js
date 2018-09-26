@@ -18,6 +18,17 @@ const pubClient = new Redis(config.redisPubSubInfo.clientUrl[0]);
 const Client = require('dict-client');
 let client = new Client(config.dictionaryServer.host, config.dictionaryServer.port);
 console.log('dict-client host: ' + config.dictionaryServer.host + ', port: ' + config.dictionaryServer.port);
+const holder_dict_redis = new Redis(config.redisUrl[2]);
+redis.on('error', function (error) {
+  console.dir(error);
+  console.log('redis: ',error);
+  logger.info('redis: ',error);
+});
+holder_dict_redis.on('error', function (error) {
+  console.dir(error);
+  console.log('holder_dict_redis: ',error);
+  logger.info('holder_dict_redis: ',error);
+})
 
 log4js.configure({
   appenders: {
@@ -339,19 +350,31 @@ let transactions = {
 
   //记录数据更新的信息
   saveContext: async function (id, ctx) {
-    let ctx_id = `ctx_${id}`;
-    let res = await redis.set(ctx_id, JSON.stringify(ctx));
-    return res;
+    try {
+      let ctx_id = `ctx_${id}`;
+      let res = await redis.set(ctx_id, JSON.stringify(ctx));
+      return res;
+    } catch (err) {
+      console.error('saveContext: ', err);
+      logger.error('saveContext: ', err);
+      return err;
+    }
   },
 
   //读取数据更新的信息
   getContext: async function (id) {
-    let ctx_id = `ctx_${id}`;
-    let res = await redis.get(ctx_id);
-    if (res) {
-      return JSON.parse(res);
-    } else {
-      return {};
+    try {
+      let ctx_id = `ctx_${id}`;
+      let res = await redis.get(ctx_id);
+      if (res) {
+        return JSON.parse(res);
+      } else {
+        return {};
+      }
+    } catch (err) {
+      console.error('getContext: ', err);
+      logger.error('getContext: ', err);
+      return err;
     }
   },
 
@@ -373,7 +396,6 @@ let transactions = {
         console.error(error);
         logger.error(error);
         return reject(error);
-
       });
     });
   },
@@ -450,11 +472,49 @@ let transactions = {
         logger.info('publish the message: %s to channel: %s', message, channel);
       }
     } catch (err) {
-      console.error(err);
-      logger.error(err);
+      console.error('publishMessage',err);
+      logger.error('publishMessage',err);
+      return err;
+    }
+  },
+
+  //保存personalCode->ITCode2的字典
+  saveHolderDict: async function (key, value) {
+    try {
+      holder_dict_redis.sadd(key, value);
+    } catch (err) {
+      console.error('saveHolderDict: ',err);
+      logger.error('saveHolderDict: ',err);
+      return err;
+    }
+  },
+
+  //取出personalCode->ITCode2字典数据
+  getHolderDict: async function (key) {
+    try {
+      let res = await holder_dict_redis.smembers(key);
+      return res;
+    } catch (err) {
+      console.error('getHolderDict',err);
+      logger.error('getHolderDict',err);
+      return err;
+    }
+  },
+
+  //清空personalCode->ITCode2字典数据
+  flushHolderDict: async function() {
+    try {
+      let res = await holder_dict_redis.flushdb();
+      if (res) {
+        console.log('flushHolderDict: ', res);
+        logger.info('flushHolderDict: ', res);
+      }
+    } catch (err) {
+      console.error('flushHolderDict: ', err);
+      logger.error('flushHolderDict: ', err);
+      return err;
     }
   }
-
 
 }
 

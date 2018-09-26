@@ -133,7 +133,6 @@ let updateTotalCompany = {
                 if (covertFlag == true) {
                     rateValueMap = getRateConvert();
                 }
-                // let id = 'TComp01';
                 let id = config.updateInfo.companyId;
                 let i = 1;
                 let ctx = await transactions.getContext(id);
@@ -142,8 +141,7 @@ let updateTotalCompany = {
                     ctx.last = 0;                  //全量更新置0
                 let resultCount = 0;
                 let startTime = Date.now();
-                let updateInfo = {};
-                let updateStatus = 0;
+                let updateInfo = {'logInfo': '', 'updateStatus': 0};
                 let CSVFilePath = '../neo4jDB_update/totalData/companies.csv';                                //windows
 
                 // writeLineStream第一个参数为ReadStream实例，也可以为文件名
@@ -158,52 +156,50 @@ let updateTotalCompany = {
                     cacheLines: 0
                 });
                 // let line1 = 'ITCode2:ID,ITName:string'; 
-                let line1 = 'isPerson:string,ITCode2:ID,RMBFund:float,regFund:float,regFundUnit:string,isExtra:string,surStatus:string,isBranches:string';
+                let line1 = 'timestamp:string,isPerson:string,ITCode2:ID,RMBFund:float,regFund:float,regFundUnit:string,isExtra:string,surStatus:string,originTable:string,isBranches:string';
                 w.write(line1);
+
+                let originTable = 'tCR0001_V2.0';                                         //数据来源
+                // let isPerson = 0;                                                         //0代表不是自然人
                 do {
                     let rows = [];
                     let now = Date.now();
-                    // let sql = `
-                    //             select top 10000 cast(tmstamp as bigint) as _ts, ITName, ITCode2 from [tCR0001_V2.0] WITH(READPAST) 
-                    //             where ITCode2 is not null and flag<> 1 and tmstamp > cast( cast(${ctx.last} as bigint) as binary(8)) order by tmstamp;
-                    //                 `;
                     let sql = `
                                 select top 10000 cast(tmstamp as bigint) as _ts, ITCode2,CR0001_005,CR0001_006,CR0001_040,CR0001_041 from [tCR0001_V2.0] WITH(READPAST) 
                                 where flag<> 1 and tmstamp > cast( cast(${ctx.last} as bigint) as binary(8)) order by tmstamp;
                               `;
-
-                    // let sql = `select top 2 PersonalCode from [tCR0002_V2.0] where PersonalCode is not null and flag<> 1 `;
                     let res = await Mssql.connect(config.mssql).query(sql);
                     let queryCost = Date.now() - now;
                     rows = res.recordset;
                     fetched = rows.length;                                                //每次查询SQL Server的实际记录数
-                    let writeCost = 0;
                     if (fetched > 0) {
                         resultCount += fetched;
                         let lines = [];
                         let codes = [];
                         for (let i = 0; i < rows.length; i++) {
+                            let rate = null;                                                          //汇率标识
+                            let rateValue = 1;
                             let ITCode = rows[i].ITCode2;
-                            let isPerson = 0;                                            //0代表不是自然人
+                            let timestamp = rows[i]._ts;
                             if (ITCode) {
                                 codes.push(ITCode);
                             }
-                            let isExtra = 0;
                             if (!ITCode) {                                                //如果ITCode为null,则传入UUID,并在node上的isExtra置1；
                                 // ITCode = UUID.v4(); 
                                 // ITCode = transactions.createRndNum(12);                
                                 ITCode = rows[i]._ts + transactions.createRndNum(6);      //产生6位随机数 + timestamp作为ITCode
                                 isExtra = 1;                                              //1代表没有机构代码
                             }
+                            else {
+                                isExtra = 0;
+                            }
                             let fund = rows[i].CR0001_005;                                //注册资金，未换算的值
                             let currencyUnit = rows[i].CR0001_006;                        //货币类型
                             let currencyFlag = rows[i].CR0001_040;                        //货币种类标识
-                            let rate = null;                                              //汇率标识
                             let surStatus = rows[i].CR0001_041;                           //续存状态
                             if (!surStatus) surStatus = 1;                                //默认为1
                             if (!currencyFlag) currencyFlag = 0;
                             if (!currencyUnit) currencyUnit = '万人民币元';
-                            let rateValue = 1;
                             if (currencyFlag != null) {
                                 rate = judgeCurrencyFlag(currencyFlag);
                             }
@@ -219,7 +215,7 @@ let updateTotalCompany = {
                             // let lineN = `${ITCode},"${ITName}"`;
                             //let lineN = `${ITCode},${RMBFund},${fund},${currencyUnit},${isExtra},${isBranches}`;
                             // w.write(lineN);
-                            lines.push([isPerson, ITCode, RMBFund, fund, currencyUnit, isExtra, surStatus]);
+                            lines.push([timestamp,0, ITCode, RMBFund, fund, currencyUnit, isExtra, surStatus, originTable]);
                         }
 
                         let branches = null;
@@ -237,11 +233,12 @@ let updateTotalCompany = {
                         if (retryCount == 3) {
                             console.error('全量更新表tCR0001_V2.0中company信息，查询分支机构失败');
                             logger.error('全量更新表tCR0001_V2.0中company信息，查询分支机构失败');
-                            break;
+                            // break;
+                            return updateInfo;
                         }
                         for (let i = 0; i < lines.length; ++i) {
                             let line = lines[i];
-                            let isBranches = 0;                                          //初始化分支机构属性,0表示不是分支机构，1表示是分支机构
+                            // let isBranches = 0;                                          //初始化分支机构属性,0表示不是分支机构，1表示是分支机构
                             if (branches[i] == "") {
                                 branches[i] = 0;
                             } else if (branches[i] != "") {
@@ -254,17 +251,16 @@ let updateTotalCompany = {
                         ctx.last = rows[fetched - 1]._ts;
                         ctx.updatetime = now;
                         ctx.latestUpdated = resultCount;
-
                         // 保存同步到的位置
                         transactions.saveContext(id, ctx)
                             .catch(err => console.error(err));
                         if (fetched > 0)
-                            logger.info(`Total table: 'tCR0001_V2.0' qry:${queryCost} ms; result:${fetched}` + ', 读写次数: ' + i);
-                        console.log('全量更新表tCR0001_V2.0中company信息，读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms');
+                            logger.info(`Total table: 'tCR0001_V2.0' qry:${queryCost} ms; result:${fetched}` + ', 读写次数: ' + i + ', last timestamp: '+ ctx.last);
+                        console.log('全量更新表tCR0001_V2.0中company信息，读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms' + ', last timestamp: '+ ctx.last);
                         i++;
 
                         //for test
-                        // if(i == 10 )
+                        // if(i == 2 )
                         //     break;
                     }
                 } while (fetched >= 10000);
@@ -275,7 +271,7 @@ let updateTotalCompany = {
                     logger.info('companies.csv write end');
                 });
                 let totalCost = Date.now() - startTime;
-                let logInfo = '全量更新表tCR0001_V2.0中company信息，总耗时: ' + totalCost + ', 更新记录数: ' + resultCount;
+                logInfo = '全量更新表tCR0001_V2.0中company信息，总耗时: ' + totalCost + ', 更新记录数: ' + resultCount;
                 updateStatus = 1;
                 updateInfo.status = updateStatus;
                 updateInfo.info = logInfo;

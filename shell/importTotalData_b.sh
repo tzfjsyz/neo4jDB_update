@@ -48,7 +48,7 @@ fi
 
 #全量导入数据
 cd $home_dir/bin
-./neo4j-admin import --database=graph.db --mode=csv --nodes:company="$home_dir/import/companies.csv" --nodes:company="$home_dir/import/extraNodes.csv" --relationships:invests="$home_dir/import/relations_invest.csv" --relationships:guarantees="$home_dir/import/relations_guarantee.csv" --id-type=INTEGER --ignore-duplicate-nodes=true --ignore-extra-columns=true --ignore-missing-nodes=true --multiline-fields=true
+./neo4j-admin import --database=graph.db --mode=csv --nodes:company="$home_dir/import/companies.csv" --nodes:company="$home_dir/import/extraNodes.csv" --nodes:company="$home_dir/import/persons.csv" --relationships:invests="$home_dir/import/relations_invest.csv" --relationships:guarantees="$home_dir/import/relations_guarantee.csv" --relationships:family="$home_dir/import/relations_family.csv" --relationships:executes="$home_dir/import/relations_execute.csv" --id-type=STRING --ignore-duplicate-nodes=true --ignore-extra-columns=true --ignore-missing-nodes=true --multiline-fields=true
 echo "`date "+%Y-%m-%d %H:%M:%S"` $@: import total data successfully!" &>>$log_file  
 
 #启动neo4j Server

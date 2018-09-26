@@ -6,14 +6,14 @@ const path = require('path');
 const moment = require('moment');
 const dumpFilePath = path.join(process.cwd(), '/heapDumpFile/');
 console.log('dumpFilePath: ' +dumpFilePath);
-const heapdump = require('heapdump');
+// const heapdump = require('heapdump');
 const dumpFileName = `${moment(Date.now()).format("YYYY-MM-DD--HH:mm:ss")}.heapsnapshot`;
 // heapdump.writeSnapshot(dumpFilePath+dumpFileName, function(err, dumpFilePath) {
 //     console.log('dump written to', dumpFileName);
 //   });
 
 server.connection({
-   port: 8091,
+   port: 8191,
    routes: {
        cors: true
    },
@@ -92,18 +92,18 @@ server.route({
 
 server.start((err) => {
     if (err) {
-        heapdump.writeSnapshot(dumpFilePath+dumpFileName, function(err, dumpFilePath) {
-            console.log('dump written to', dumpFileName);
-          });
+        // heapdump.writeSnapshot(dumpFilePath+dumpFileName, function(err, dumpFilePath) {
+        //     console.log('dump written to', dumpFileName);
+        //   });
         throw err;
     }
     console.info(`neo4j数据库全量数据更新API服务运行在:${server.info.uri}`);
 });
 
 process.on('unhandledRejection', (err) => {
-    heapdump.writeSnapshot(dumpFilePath+dumpFileName, function(err, dumpFilePath) {
-        console.log('dump written to', dumpFileName);
-      });
+    // heapdump.writeSnapshot(dumpFilePath+dumpFileName, function(err, dumpFilePath) {
+    //     console.log('dump written to', dumpFileName);
+    //   });
     console.log(err);
     console.log('NOT exit...');
     process.exit(1);

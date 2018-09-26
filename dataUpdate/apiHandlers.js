@@ -8,12 +8,20 @@ const req = require('require-yml');
 const config = req('./config/source.yml');
 const path = require('path');
 const transactions = require('./transactions.js');
-const util = require('util');
-const setImmediatePromise = util.promisify(setImmediate);
 const sleep = require('system-sleep');
 const Redis = require('ioredis');
 const redis = new Redis(config.redisUrl[0]);
 const redis1 = new Redis(config.redisUrl[1]);
+redis.on('error', function (error) {
+    console.dir(error);
+    console.log('redis: ',error);
+    logger.info('redis: ',error);
+  });
+redis1.on('error', function (error) {
+console.dir(error);
+console.log('redis1: ',error);
+logger.info('redis1: ',error);
+});
 const Redlock = require('redlock');
 const lockResource = config.lockInfo.resource[0];
 const lockTTL = config.lockInfo.TTL[0];
@@ -44,15 +52,18 @@ let redlock = new Redlock(
 //写入dump文件的信息
 const dumpFilePath = path.join(process.cwd(), '/heapDumpFile/');
 console.log('dumpFilePath: ' + dumpFilePath);
-const heapdump = require('heapdump');
+// const heapdump = require('heapdump');
 const dumpFileName = `${moment(Date.now()).format("YYYY-MM-DD--HH:mm:ss")}.heapsnapshot`;
 
 const NodeHaproxyStats = require('./nodeHaproxyStats.js');
 const HAServerName = config.haproxyInfo.defaultServerName;
-const HAServerIP = config.haproxyInfo.defaultServerIP;
+const HAServerIPs = config.haproxyInfo.defaultServerIPs;
 const HAServerPort = config.haproxyInfo.defaultServerPort;
-console.log('HAServerName: ' + HAServerName + ', HAServerIP: ' + HAServerIP + ', HAServerPort: ' + HAServerPort);
-const hs = new NodeHaproxyStats(HAServerIP, HAServerPort);
+const HSArray = [];
+for (let HAServerIP of HAServerIPs) {
+    console.log('HAServerName: ' + HAServerName + ', HAServerIP: ' + HAServerIP + ', HAServerPort: ' + HAServerPort);
+    HSArray.push(new NodeHaproxyStats(HAServerIP, HAServerPort));
+}
 
 const remoteServersInfo = [];
 const remoteserversNum = config.sshServer.length;
@@ -146,9 +157,9 @@ function errorResp(err, msg) {
 
 
 //for test, 定时任务获取process的信息
-schedule.scheduleJob('1 * * * * *', function () {
-    getProcessInfo();
-});
+// schedule.scheduleJob('1 * * * * *', function () {
+//     getProcessInfo();
+// });
 
 function getCpuInfo() {
     const startUsage = process.cpuUsage();
@@ -184,9 +195,9 @@ function getProcessInfo() {
     let memoryLeftValue = processInfo.memoryUsage.heapTotal - processInfo.memoryUsage.heapUsed;
     let warnMemoryLeftValue = config.gcInfo.warnMemoryLeftValue;
     if (memoryLeftValue <= warnMemoryLeftValue) {
-        heapdump.writeSnapshot(dumpFilePath + dumpFileName, function (err, dumpFilePath) {
+        // heapdump.writeSnapshot(dumpFilePath + dumpFileName, function (err, dumpFilePath) {
             console.log('dump written to', dumpFileName);
-        });
+        // });
         console.warn('memoryLeftValue: ' + memoryLeftValue + 'the heap memory will be exhaust!');
         logger.warn('memoryLeftValue: ' + memoryLeftValue + 'the heap memory will be exhaust!');
         forceGC();
@@ -214,11 +225,13 @@ async function startImportTotalData(ser, shellFileName, remoteShellPath) {
             importDataResult.cmdShellResult = cmdShellRes;
             console.log(JSON.stringify(importDataResult.cmdShellResult));
             logger.info(JSON.stringify(importDataResult.cmdShellResult));
+            for (let hs of HSArray) {
             //建索引时，先set server state maint, 建完索引后set server state ready, 0代表The server is down，2代表The server is fully up.
             hs.backend(HAServerName).server(`server_${serId}`).address(ser.ip[0], ser.neo4jServerBoltPort);
             hs.backend(HAServerName).server(`server_${serId}`).disable();                        //set server state maint
             hs.backend(HAServerName).server(`server_${serId}`).shutdownSession();                //Immediately terminate all the sessions attached to the specified server.
             hs.backend(HAServerName).server(`server_${serId}`).showState();
+            }
         }
         else {
             importDataResult.cmdShellResult = null;
@@ -341,6 +354,9 @@ let apiHandlers = {
                     let compId = `${config.updateInfo.companyId}`;
                     let relId_invest = `${config.updateInfo.relationId_invest}`;
                     let relId_guarantee = `${config.updateInfo.relationId_guarantee}`;
+                    let relId_family = `${config.updateInfo.relationId_family}`;
+                    let relId_executive = `${config.updateInfo.relationId_executive}`;
+                    let relId_holder = `${config.updateInfo.relationId_holder}`;
                     let upCompFlag = 'true';
                     let upRelFlag = 'true';
                     //let localShellPath = path.join(process.cwd(), '\\shell\\');             //windows
@@ -389,22 +405,35 @@ let apiHandlers = {
                     transactions.saveContext(compId, ctx);
                     transactions.saveContext(relId_invest, ctx);
                     transactions.saveContext(relId_guarantee, ctx);
+                    transactions.saveContext(relId_family, ctx);
+                    transactions.saveContext(relId_executive, ctx);
+                    transactions.saveContext(relId_holder, ctx);
 
                     //1. for test 
                     // let compUpdateLast = { 'last': 0 };
                     // let investRelUpdateLast = { 'last': 0 };
                     // let guaranteeRelUpdateLast = { 'last': 0 };
+                    // let familyRelUpdateLast = { 'last': 0 };
+                    // let executiveRelUpdateLast = { 'last': 0 };
 
                     let compUpdateLast = await transactions.getContext(compId);
                     let investRelUpdateLast = await transactions.getContext(relId_invest);
                     let guaranteeRelUpdateLast = await transactions.getContext(relId_guarantee);
-                    console.log('初始化数据更新记录标识：' + 'compUpdateLast=' + compUpdateLast.last + ', investRelUpdateLast=' + investRelUpdateLast.last + ', guaranteeRelUpdateLast=' + guaranteeRelUpdateLast.last);
-                    logger.info('初始化数据更新记录标识：' + 'compUpdateLast=' + compUpdateLast.last + ', investRelUpdateLast=' + investRelUpdateLast.last + ', guaranteeRelUpdateLast=' + guaranteeRelUpdateLast.last);
-                    if (compUpdateLast.last == 0 && investRelUpdateLast.last == 0 && guaranteeRelUpdateLast.last == 0) {                                             //判断companies/relations更新数据的信息标识是否全部初始化
+                    let familyRelUpdateLast = await transactions.getContext(relId_family);
+                    let executiveRelUpdateLast = await transactions.getContext(relId_executive);
+                    let holderDictUpdateLast = await transactions.getContext(relId_holder);
+                    console.log('初始化数据更新记录标识：' + 'compUpdateLast=' + compUpdateLast.last + ', investRelUpdateLast=' + investRelUpdateLast.last +
+                                ', guaranteeRelUpdateLast=' + guaranteeRelUpdateLast.last + ', familyRelUpdateLast=' + familyRelUpdateLast.last +
+                                ', executiveRelUpdateLast=' + executiveRelUpdateLast.last + ', holderDictUpdateLast=' + holderDictUpdateLast.last);
+                    logger.info('初始化数据更新记录标识：' + 'compUpdateLast=' + compUpdateLast.last + ', investRelUpdateLast=' + investRelUpdateLast.last +
+                                ', guaranteeRelUpdateLast=' + guaranteeRelUpdateLast.last + ', familyRelUpdateLast=' + familyRelUpdateLast.last +
+                                ', executiveRelUpdateLast=' + executiveRelUpdateLast.last + ', holderDictUpdateLast=' + holderDictUpdateLast.last);
+                    if (holderDictUpdateLast.last == 0 && compUpdateLast.last == 0 && investRelUpdateLast.last == 0 && guaranteeRelUpdateLast.last == 0 && familyRelUpdateLast.last == 0 && executiveRelUpdateLast.last == 0) {                                             //判断companies/relations更新数据的信息标识是否全部初始化
                         let now = Date.now();
 
                         //2. for test
-                        // let updateRes = { 'compUpdateStatus': { 'status': 1 }, 'invRelUpdateStatus': { 'status': 1 }, 'guaRelUpdateStatus': { 'status': 1 } };
+                        // let updateRes = { compUpdateStatus: { status: 1 }, invRelUpdateStatus: { status: 1 }, guaRelUpdateStatus: { status: 1 },
+                        //                   famRelUpdateStatus: { status: 1}, exeInvRelUpdateStatus: {status: 1 } };
                         let updateRes = await timingUpdate.startTotalUpdate(upCompFlag, upRelFlag);
                         let loadCSVCost = Date.now() - now;
                         console.log('生成companies/relations的CSV文件耗时: ' + loadCSVCost + 'ms');
@@ -423,8 +452,8 @@ let apiHandlers = {
                         let memoryChange1 = { rss_c: rss_change1, heapTotal_c: heapTotal_change1, heapUsed_c: heapUsed_change1, external_c: external_change1 };
                         console.log('数据更新前后的memory变化: ' + JSON.stringify(memoryChange1));
                         logger.info('数据更新前后的memory变化: ' + JSON.stringify(memoryChange1));
-
-                        if (updateRes.compUpdateStatus.status == 1 && updateRes.invRelUpdateStatus.status == 1 && updateRes.guaRelUpdateStatus.status == 1) {        //判断companies/relations的CSV文件是否全部生成
+                        //判断companies/relations的CSV文件是否全部生成
+                        if (updateRes.holderDictUpdateStatus.status == 1 && updateRes.compUpdateStatus.status == 1 && updateRes.invRelUpdateStatus.status == 1 && updateRes.guaRelUpdateStatus.status == 1 && updateRes.famRelUpdateStatus.status == 1 && updateRes.exeInvRelUpdateStatus.status == 1) {        
                             let putCSVFlag = 0;                                                                       //记录CSV文件传输成功和失败的信息
                             let putShellFlag = 0;                                                                     //记录Shell文件传输成功和失败的信息
                             //SSH远程传输CSV文件
@@ -471,9 +500,9 @@ let apiHandlers = {
                                     let serId = ser.id;
                                     let shellFileName = ser.shellFileName;
                                     let remoteShellPath = ser.remoteShellPath;
-                                    let neo4jInstallPath = ser.neo4jInstallPath;
-                                    let serConInfo = { host: ser.ip[0], port: ser.port, username: ser.username, password: ser.password };
-                                    let stateCmd = `echo "show servers state" | socat stdio tcp4-connect:${HAServerIP}:${HAServerPort}`;
+                                    // let neo4jInstallPath = ser.neo4jInstallPath;
+                                    // let serConInfo = { host: ser.ip[0], port: ser.port, username: ser.username, password: ser.password };
+                                    // let stateCmd = `echo "show servers state" | socat stdio tcp4-connect:${HAServerIP}:${HAServerPort}`;
 
                                     //5. for test
                                     // let importDataRes = { systemInfo: { nodeIdsNum: 1000, propertyIdsNum: 2200, relationshipIdsNum: 3, relationshipTypeIdsNum: 3 } };
@@ -521,19 +550,23 @@ let apiHandlers = {
                                                     //确认防火墙关闭后, 检查index的状态
                                                     */
 
-                                                    //建索引时，先set server state maint, 建完索引后set server state ready, 0代表The server is down，2代表The server is fully up.
-                                                    hs.backend(HAServerName).server(`server_${serId}`).address(ser.ip[0], ser.neo4jServerBoltPort);
-                                                    hs.backend(HAServerName).server(`server_${serId}`).disable();                        //set server state maint
-                                                    hs.backend(HAServerName).server(`server_${serId}`).shutdownSession();                //Immediately terminate all the sessions attached to the specified server.
-                                                    hs.backend(HAServerName).server(`server_${serId}`).showState();
+                                                    for (let hs of HSArray) {
+                                                        //建索引时，先set server state maint, 建完索引后set server state ready, 0代表The server is down，2代表The server is fully up.
+                                                        hs.backend(HAServerName).server(`server_${serId}`).address(ser.ip[0], ser.neo4jServerBoltPort);
+                                                        hs.backend(HAServerName).server(`server_${serId}`).disable();                        //set server state maint
+                                                        hs.backend(HAServerName).server(`server_${serId}`).shutdownSession();                //Immediately terminate all the sessions attached to the specified server.
+                                                        hs.backend(HAServerName).server(`server_${serId}`).showState();
+                                                    }
 
                                                     //6. for test
                                                     // sleep(10000);
                                                     sleep(waitIndexOnTime);
 
-                                                    hs.backend(HAServerName).server(`server_${serId}`).address(ser.ip[0], ser.neo4jServerBoltPort);
-                                                    hs.backend(HAServerName).server(`server_${serId}`).enable();                        //set server state ready
-                                                    hs.backend(HAServerName).server(`server_${serId}`).showState();
+                                                    for (let hs of HSArray) {
+                                                        hs.backend(HAServerName).server(`server_${serId}`).address(ser.ip[0], ser.neo4jServerBoltPort);
+                                                        hs.backend(HAServerName).server(`server_${serId}`).enable();                        //set server state ready
+                                                        hs.backend(HAServerName).server(`server_${serId}`).showState();
+                                                    }
 
                                                     indexState = await transactions.getIndexStatus(serId, labelName1, indexName1);
 
