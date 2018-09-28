@@ -415,6 +415,7 @@ let apiHandlers = {
                     // let guaranteeRelUpdateLast = { 'last': 0 };
                     // let familyRelUpdateLast = { 'last': 0 };
                     // let executiveRelUpdateLast = { 'last': 0 };
+                    // let holderDictUpdateLast = { 'last': 0 };
 
                     let compUpdateLast = await transactions.getContext(compId);
                     let investRelUpdateLast = await transactions.getContext(relId_invest);

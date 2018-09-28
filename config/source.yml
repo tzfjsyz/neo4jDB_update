@@ -35,12 +35,10 @@ mssql_rate:
 
 #记录company和relationShip数据更新的timestamp
 redisUrl:
-  #- redis://:finchina@10.15.97.48:6379/0
-  #- redis://:finchina@10.15.97.88:6379/0
-  - redis://:finchina@10.15.97.135:6679/0
-  - redis://:finchina@10.15.97.135:6679/1
-  #- redis://:finchina@10.17.205.190:6379/5
-  - redis://:finchina@10.15.97.135:6679/11
+  - redis://:finchina@10.15.97.135:6679/14
+  - redis://:finchina@10.15.97.135:6679/15
+  - redis://:finchina@10.17.205.190:6379/7
+  #- redis://:finchina@10.15.97.135:6679/11
 
 #远程安装neo4j server的服务器信息
 sshServer:

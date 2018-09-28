@@ -238,13 +238,15 @@ let updateTotalRelation = {
                     let queryCost = Date.now() - now;
                     rows = res.recordset;
                     fetched = rows.length;                                                                   //每次查询SQL Server的实际记录数
+                    let keyValues = [];
                     if (fetched > 0) {
                         resultCount += fetched;
                         for (let i = 0; i < rows.length; i++) {
                             let startId = rows[i].PersonalCode;
                             let endId = rows[i].ITCode2;
-                            transactions.saveHolderDict(startId, endId);
+                            keyValues.push(`${startId}-${endId}`, '1');
                         }
+                        transactions.saveHolderDict(keyValues);
                         ctx.last = rows[fetched - 1]._ts;
                         ctx.updatetime = now;
                         ctx.latestUpdated = resultCount;
@@ -324,7 +326,10 @@ let updateTotalRelation = {
                     let queryCost = Date.now() - now;
                     rows = res.recordset;
                     fetched = rows.length;                                                                   //每次查询SQL Server的实际记录数
+                    writeStart = Date.now();
                     if (fetched > 0) {
+                        let keyLines = [];
+                        let perLines = [];
                         resultCount += fetched;
                         for (let i = 0; i < rows.length; i++) {
                             let startId = rows[i].CR0002_011;
@@ -349,8 +354,6 @@ let updateTotalRelation = {
                             }
                             let subAmountRMB = subAmount * rateValue;
                             if (!startId && !perCode) {                                                         //机构代码CR0002_011为空，并且PersonalCode为空时，则该机构随机生成ID
-                                // let id = UUID.v4();
-                                // let id = transactions.createRndNum(12);                                      //产生12位随机数作为ITCode
                                 let id = rows[i]._ts + transactions.createRndNum(6);
                                 startId = id;
                                 let startName = rows[i].CR0002_003;
@@ -358,6 +361,16 @@ let updateTotalRelation = {
                                 if (!name) name = 'others';
                                 isExtra = 1;                                                                   //1代表没有机构代码
                                 let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${originTable},${startIsBranches}`;
+                                extraNodeW.write(extraLineN);
+                            }
+                            if (!endId) {
+                                let id = transactions.createRndNum(6) + rows[i]._ts;
+                                endId = id;
+                                let endName = rows[i].ITName;
+                                let name = stripscript(endName);
+                                if (!name) name = 'others';
+                                isExtra = 1;
+                                let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${originTable},${endIsBranches}`;
                                 extraNodeW.write(extraLineN);
                             }
                             if (perCode) {                                                                     //PersonalCode不为空时，则为自然人，ID用PersonalCode代替
@@ -368,46 +381,33 @@ let updateTotalRelation = {
                                 isExtra = 1;
                                 let personLineN = `1,${perCode},${name},${isExtra},${originTable}`;
                                 personW.write(personLineN);
-                            }
-                            if (!endId) {
-                                // let id = UUID.v4();
-                                // let id = transactions.createRndNum(12);                                          //产生12位随机数作为ITCode
-                                let id = transactions.createRndNum(6) + rows[i]._ts;
-                                endId = id;
-                                let endName = rows[i].ITName;
-                                let name = stripscript(endName);
-                                if (!name) name = 'others';
-                                isExtra = 1;
-                                // let RMBFund = 0;
-                                // let regFund = 0;
-                                // let regFundUnit = 'null';
-                                let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${originTable},${endIsBranches}`;
-                                extraNodeW.write(extraLineN);
-                            }
-                            if (perCode) {
-                                let list = await transactions.getHolderDict(perCode);
-                                if (list.length > 0) {
-                                    if (-1 != list.indexOf(endId)) {
-                                        let lineN = `${timestamp},${startId},invests,${holdWeight},${subAmountRMB},${subAmount},${subAmountUnit},${endId}`;
-                                        investW.write(lineN);
-                                    }
-                                    else {
-                                        filtered ++;
-                                        // console.log('过滤PersonalCode: ' + startId + ', ITCode2: ' + endId +'，PersonalCode对应不到此ITCode2' +', timestamp: ' +timestamp +', 过滤记录数: ' +filtered);
-                                        // logger.info('过滤PersonalCode: ' + startId + ', ITCode2: ' + endId +'，PersonalCode对应不到此ITCode2' +', timestamp: ' +timestamp);
-                                    }
-                                }
-                                else {
-                                    filtered ++;
-                                    // console.log('过滤PersonalCode: ' + startId + ', ITCode2: ' + endId +'，PersonalCode不在tCR0063表中' +', timestamp: ' +timestamp +', 过滤记录数: ' +filtered);
-                                    // logger.info('过滤PersonalCode: ' + startId + ', ITCode2: ' + endId +'，PersonalCode不在tCR0063表中' +', timestamp: ' +timestamp);
-                                }
+                                keyLines.push(`${perCode}-${endId}`);
+                                perLines.push(`${timestamp},${startId},invests,${holdWeight},${subAmountRMB},${subAmount},${subAmountUnit},${endId}`);
                             }
                             else if (!perCode) {
                                 let lineN = `${timestamp},${startId},invests,${holdWeight},${subAmountRMB},${subAmount},${subAmountUnit},${endId}`;
                                 investW.write(lineN);
                             }
                         }
+                        if (keyLines.length > 0) {
+                            let flags = await transactions.getHolderDict(keyLines);
+                            if (flags && flags.length == keyLines.length) {
+                                for (let i = 0; i < perLines.length; i++) {
+                                    if ('1' == flags[i]) {
+                                        investW.write(perLines[i]);
+                                    }
+                                    else {
+                                        filtered ++;
+                                    }
+                                }
+                            }
+                            else {
+                                console.error('查询HolderDict字典失败!');
+                                logger.error('查询HolderDict字典失败!');
+                                return -1;
+                            }
+                        }
+                        
                         ctx.last = rows[fetched - 1]._ts;
                         ctx.updatetime = now;
                         ctx.latestUpdated = resultCount;
@@ -415,9 +415,10 @@ let updateTotalRelation = {
                         // 保存同步到的位置
                         transactions.saveContext(id, ctx)
                             .catch(err => console.error(err));
+                        writeCost = Date.now() - writeStart;
                         if (fetched > 0)
-                            logger.info(`Total table: 'tCR0002_V2.0' qry:${queryCost} ms; result:${fetched}` + ', 读写次数: ' + i + ', last timestamp: ' + ctx.last);
-                        console.log('全量更新表tCR0002_V2.0中relation信息,读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms' + ', last timestamp: ' + ctx.last);
+                            logger.info(`Total table: 'tCR0002_V2.0' qry:${queryCost} ms; result:${fetched}` +', writeCost: ' + writeCost + 'ms' + ', 读写次数: ' + i + ', last timestamp: ' + ctx.last);
+                        console.log('全量更新表tCR0002_V2.0中relation信息,读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms' +', writeCost: ' + writeCost + 'ms' + ', last timestamp: ' + ctx.last);
                         i++;
 
                         //for test
@@ -505,32 +506,22 @@ let updateTotalRelation = {
                             let endId = rows[i].CR0008_003;
                             let timestamp = rows[i]._ts;
                             if (!startId) {
-                                // let id = UUID.v4();
-                                // let id = transactions.createRndNum(12);                                      //产生12位随机数作为ITCode
                                 let id = rows[i]._ts + transactions.createRndNum(6);
                                 startId = id;
                                 let startName = rows[i].ITName;
                                 let name = stripscript(startName);
                                 if (!name) name = 'others';
                                 isExtra = 1;
-                                // let RMBFund = 0;
-                                // let regFund = 0;
-                                // let regFundUnit = 'null';
                                 let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${originTable},${startIsBranches}`;
                                 extraNodeW.write(extraLineN);
                             }
                             if (!endId) {
-                                // let id = UUID.v4();
-                                // let id = transactions.createRndNum(12);                                          //产生12位随机数作为ITCode
                                 let id = transactions.createRndNum(6) + rows[i]._ts;
                                 endId = id;
                                 let endName = rows[i].CR0008_002;
                                 let name = stripscript(endName);
                                 if (!name) name = 'others';
                                 isExtra = 1;
-                                // let RMBFund = 0;
-                                // let regFund = 0;
-                                // let regFundUnit = 'null';
                                 let extraLineN = `${isPerson},${id},${name},${RMBFund},${regFund},${regFundUnit},${isExtra},${surStatus},${originTable},${endIsBranches}`;
                                 extraNodeW.write(extraLineN);
                             }

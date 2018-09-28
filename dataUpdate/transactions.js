@@ -479,9 +479,10 @@ let transactions = {
   },
 
   //保存personalCode->ITCode2的字典
-  saveHolderDict: async function (key, value) {
+  saveHolderDict: async function (keyValue) {
     try {
-      holder_dict_redis.sadd(key, value);
+      // holder_dict_redis.sadd(key, value);
+      holder_dict_redis.mset(keyValue);
     } catch (err) {
       console.error('saveHolderDict: ',err);
       logger.error('saveHolderDict: ',err);
@@ -492,7 +493,8 @@ let transactions = {
   //取出personalCode->ITCode2字典数据
   getHolderDict: async function (key) {
     try {
-      let res = await holder_dict_redis.smembers(key);
+      // let res = await holder_dict_redis.sismember(key, value);
+      let res = await holder_dict_redis.mget(key);
       return res;
     } catch (err) {
       console.error('getHolderDict',err);

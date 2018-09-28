@@ -160,7 +160,6 @@ let updateTotalCompany = {
                 w.write(line1);
 
                 let originTable = 'tCR0001_V2.0';                                         //数据来源
-                // let isPerson = 0;                                                         //0代表不是自然人
                 do {
                     let rows = [];
                     let now = Date.now();
@@ -172,6 +171,7 @@ let updateTotalCompany = {
                     let queryCost = Date.now() - now;
                     rows = res.recordset;
                     fetched = rows.length;                                                //每次查询SQL Server的实际记录数
+                    writeStart = Date.now();
                     if (fetched > 0) {
                         resultCount += fetched;
                         let lines = [];
@@ -184,9 +184,7 @@ let updateTotalCompany = {
                             if (ITCode) {
                                 codes.push(ITCode);
                             }
-                            if (!ITCode) {                                                //如果ITCode为null,则传入UUID,并在node上的isExtra置1；
-                                // ITCode = UUID.v4(); 
-                                // ITCode = transactions.createRndNum(12);                
+                            if (!ITCode) {                                                //如果ITCode为null,则传入UUID,并在node上的isExtra置1；      
                                 ITCode = rows[i]._ts + transactions.createRndNum(6);      //产生6位随机数 + timestamp作为ITCode
                                 isExtra = 1;                                              //1代表没有机构代码
                             }
@@ -209,13 +207,7 @@ let updateTotalCompany = {
                                 rateValue = parseFloat(rateValueMap[`${rate}`]);
                             }
                             let RMBFund = fund * rateValue;
-                            // let ITName =  rows[i].ITName.replace(/"/g, '\\"');         //将ITName中包含的所有引号转义
-                            // let ITName =  rows[i].ITName.replace(/"/g, '\""');
-                            // let lineN = `"${ITCode}","${ITName}"`;
-                            // let lineN = `${ITCode},"${ITName}"`;
-                            //let lineN = `${ITCode},${RMBFund},${fund},${currencyUnit},${isExtra},${isBranches}`;
-                            // w.write(lineN);
-                            lines.push([timestamp,0, ITCode, RMBFund, fund, currencyUnit, isExtra, surStatus, originTable]);
+                            lines.push([timestamp, 0, ITCode, RMBFund, fund, currencyUnit, isExtra, surStatus, originTable]);
                         }
 
                         let branches = null;
@@ -254,9 +246,10 @@ let updateTotalCompany = {
                         // 保存同步到的位置
                         transactions.saveContext(id, ctx)
                             .catch(err => console.error(err));
+                        writeCost = Date.now() - writeStart;
                         if (fetched > 0)
-                            logger.info(`Total table: 'tCR0001_V2.0' qry:${queryCost} ms; result:${fetched}` + ', 读写次数: ' + i + ', last timestamp: '+ ctx.last);
-                        console.log('全量更新表tCR0001_V2.0中company信息，读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms' + ', last timestamp: '+ ctx.last);
+                            logger.info(`Total table: 'tCR0001_V2.0' qry:${queryCost} ms; result:${fetched}` +', writeCost: ' + writeCost + 'ms' + ', 读写次数: ' + i + ', last timestamp: '+ ctx.last);
+                        console.log('全量更新表tCR0001_V2.0中company信息，读写次数: ' + i + '， 查询SQLServer耗时：' + queryCost + 'ms' +', writeCost: ' + writeCost + 'ms' + ', last timestamp: '+ ctx.last);
                         i++;
 
                         //for test
